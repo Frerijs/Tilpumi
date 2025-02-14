@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="lv">
+<head>
+  <meta charset="utf-8">
+  <title>Tilpumu aprēķins</title>
+  
+  <!-- Iekļaujam d3-delaunay -->
+  <script src="https://d3js.org/d3-delaunay.v6.min.js"></script>
+  
+  <!-- Iekļaujam Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" crossorigin=""/>
+  
+  <!-- Iekļaujam Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js" crossorigin=""></script>
+  
+  <!-- Iekļaujam proj4 un proj4leaflet -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.0/proj4.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4leaflet/1.0.2/proj4leaflet.js"></script>
+  
+  <!-- Iekļaujam SheetJS (xlsx) bibliotēku Excel faila izveidei -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  
+  <!-- Iekļaujam dxf-parser (versija 1.1.2) DXF faila parsēšanai -->
+  <script src="https://unpkg.com/dxf-parser@1.1.2/dist/dxf-parser.js"></script>
+  
+  <style>
+    body { font-family: sans-serif; margin: 1rem; }
+    h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+    label { display: block; margin-top: 0.5rem; }
+    input[type="file"] { margin-bottom: 1rem; }
+    button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
+    #output { margin-top: 1rem; }
+    #debug { margin-top: 1rem; padding: 1rem; background: #f0f0f0; border: 1px solid #ccc; max-height: 200px; overflow-y: auto; font-size: 0.9rem; }
+    #map { height: 800px; margin-top: 1rem; border: 1px solid #ccc; display: none; }
+    .polygon-number { background: rgba(255,255,255,0.8); border: 1px solid #333; border-radius: 50%; text-align: center; font-weight: bold; color: #333; }
+    .result-table-container { height: 300px; overflow-y: auto; }
+    table { width: 100%; border-collapse: collapse; margin: 0; }
+    table, th, td { border: 1px solid #ccc; }
+    th, td { padding: 0.5rem; text-align: center; }
+    th { background: #eee; position: sticky; top: 0; z-index: 1; }
+    table thead th { position: sticky; top: 0; background: #eee; z-index: 1; }
+  </style>
+</head>
+<body>
+  <h1>Tilpumu aprēķins</h1>
+  <div>
+    <label>1. CSV (x,y,z) – virsma 1:
+      <input type="file" id="csv1" accept=".csv">
+    </label>
+    <label>2. CSV (x,y,z) – virsma 2:
+      <input type="file" id="csv2" accept=".csv">
+    </label>
+    <label>3. Kontūras *.DXF vai *.GeoJSON:
+      <input type="file" id="geojson" accept=".geojson,.json,.dxf">
+    </label>
+    <button id="compute">Aprēķināt tilpumu</button>
+  </div>
+  
+  <div id="output"></div>
+  <button id="downloadGeojson" style="display:none;">Lejuplādēt rezultātu *.GeoJSON</button>
+  <button id="downloadTIN1" style="display:none;">Lejuplādēt VIRSMA 1 *.GeoJSON</button>
+  <button id="downloadTIN2" style="display:none;">Lejuplādēt VIRSMA 2 *.GeoJSON</button>
+  <button id="downloadLandXML1" style="display:none;">Lejuplādēt VIRSMA 1 *.LandXML</button>
+  <button id="downloadLandXML2" style="display:none;">Lejuplādēt VIRSMA 1 *.LandXML</button>
+  <button id="downloadExcel" style="display:none;">Lejuplādēt tabulas datus *.xlsx (Excel)</button>
+  <button id="downloadDXF" style="display:none;">Lejuplādēt rezultātus *.DXF (darbojas Microstation)</button>
+  
+  <div id="map"></div>
+  <div id="debug"><strong>Debug:</strong><br></div>
+
+  <script>
+    // Palīgfunkcija – logēšana
+    function logDebug(message) {
+      const debugDiv = document.getElementById("debug");
+      const timeStamp = new Date().toLocaleTimeString();
+      debugDiv.innerHTML += `[${timeStamp}] ${message}<br>`;
+      debugDiv.scrollTop = debugDiv.scrollHeight;
+    }
+
+    // CSV parsēšana
+    function parseCSV(text) {
+      const lines = text.trim().split('\n');
+      const data = [];
+      lines.forEach(line => {
+        const parts = line.split(',').map(s => parseFloat(s.trim()));
+        if (parts.length >= 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+          data.push({ x: parts[0], y: parts[1], z: parts[2] });
+        }
+      });
+      return data;
+    }
+
+    // Delaunay triangulācijas konvertēšana uz GeoJSON
+    function delaunayToGeoJSON(delaunay, csvData) {
+      const pts = delaunay.points;
+      const tris = delaunay.triangles;
+      const features = [];
+      for (let i = 0; i < tris.length; i += 3) {
+        const i0 = tris[i], i1 = tris[i+1], i2 = tris[i+2];
+        const p0 = [pts[2*i0], pts[2*i0+1], csvData[i0].z];
+        const p1 = [pts[2*i1], pts[2*i1+1], csvData[i1].z];
+        const p2 = [pts[2*i2], pts[2*i2+1], csvData[i2].z];
+        features.push({
+          type: "Feature",
+          geometry: {
+            type: "Polygon",
+            coordinates: [[p0, p1, p2, p0]]
+          },
+          properties: {}
+        });
+      }
+      return { type: "FeatureCollection", features: features, crs: { type: "name", properties: { name: "EPSG:3059" } } };
+    }
+
+    // LandXML eksportēšanas funkcija ar apmainītām x un y koordinātēm
+    function delaunayToLandXML(delaunay, csvData, surfaceName) {
+      let now = new Date();
+      let dateStr = now.toISOString().split("T")[0]; // "YYYY-MM-DD"
+      let timeStr = now.toTimeString().split(" ")[0]; // "HH:MM:SS"
+
+      let xml = `<?xml version="1.0" encoding="iso-8859-4" ?>\n`;
+      xml += `<LandXML xmlns="http://www.landxml.org/schema/LandXML-1.0" `;
+      xml += `xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" `;
+      xml += `xsi:schemaLocation="http://www.landxml.org/schema/LandXML-1.0 `;
+      xml += `http://www.landxml.org/schema/landxml-1.0/LandXML-1.0.xsd" `;
+      xml += `version="1.0" date="${dateStr}" time="${timeStr}">\n`;
+      
+      xml += `  <Units>\n`;
+      xml += `    <Metric areaUnit="squareMeter" linearUnit="meter" volumeUnit="cubicMeter" `;
+      xml += `temperatureUnit="celsius" pressureUnit="HPA" angularUnit="radians" directionUnit="radians"/>\n`;
+      xml += `  </Units>\n`;
+      
+      xml += `  <Application name="YourAppName" manufacturer="YourManufacturer" version="1.0" manufacturerURL="http://yoururl.com"/>\n`;
+      
+      xml += `  <Surfaces>\n`;
+      xml += `    <Surface name="${surfaceName}" state="proposed">\n`;
+      
+      // SourceData ar PntList3D – visi CSV punkti (apmainot x un y)
+      xml += `      <SourceData>\n`;
+      xml += `        <DataPoints name="pkt" DTMAttribute="spot">\n`;
+      xml += `          <PntList3D>\n`;
+      // Apmainām x un y: izmantojam pt.y kā x un pt.x kā y
+      let pntList = csvData.map(pt => `${pt.y} ${pt.x} ${pt.z}`).join("  ");
+      xml += `              ${pntList}\n`;
+      xml += `          </PntList3D>\n`;
+      xml += `          <Feature code="DataPoints">\n`;
+      xml += `            <Property label="guid" value="YOUR-DATAPOINTS-GUID-HERE"/>\n`;
+      xml += `            <Property label="style" value="PKT"/>\n`;
+      xml += `            <Property label="triangulate" value="true"/>\n`;
+      xml += `            <Property label="pointDensity" value="0.000000000"/>\n`;
+      xml += `          </Feature>\n`;
+      xml += `        </DataPoints>\n`;
+      xml += `      </SourceData>\n`;
+      
+      // TIN definīcija: Punti un sešu trijstūri (apmainām koordinātes arī šeit)
+      xml += `      <Definition surfType="TIN">\n`;
+      xml += `        <Pnts>\n`;
+      for (let i = 0; i < csvData.length; i++) {
+        let pt = csvData[i];
+        xml += `          <P id="${i + 1}">\n`;
+        xml += `              ${pt.y} ${pt.x} ${pt.z}\n`;
+        xml += `          </P>\n`;
+      }
+      xml += `        </Pnts>\n`;
+      
+      xml += `        <Faces>\n`;
+      let tris = delaunay.triangles;
+      for (let i = 0; i < tris.length; i += 3) {
+        let v1 = tris[i] + 1, v2 = tris[i + 1] + 1, v3 = tris[i + 2] + 1;
+        xml += `          <F>\n`;
+        xml += `              ${v1} ${v2} ${v3}\n`;
+        xml += `          </F>\n`;
+      }
+      xml += `        </Faces>\n`;
+      xml += `      </Definition>\n`;
+      
+      xml += `      <Feature code="Surface">\n`;
+      xml += `        <Property label="pref" value="Default"/>\n`;
+      xml += `        <Property label="guid" value="YOUR-SURFACE-GUID-HERE"/>\n`;
+      xml += `      </Feature>\n`;
+      
+      xml += `    </Surface>\n`;
+      xml += `  </Surfaces>\n`;
+      xml += `</LandXML>`;
+      
+      return xml;
+    }
+
+    // Tolerances funkcija – salīdzināšanai
+    function nearlyEqual(a, b, tolerance = 0.001) {
+      return Math.abs(a - b) < tolerance;
+    }
+
+    // DXF parsēšanas funkcija
+    function parseDXFToGeoJSON(dxfText) {
+      let parser = new DxfParser();
+      let dxf;
+      try {
+        dxf = parser.parseSync(dxfText);
+      } catch (err) {
+        logDebug("DXF parsēšanas kļūda: " + err);
+        return { type: "FeatureCollection", features: [] };
+      }
+      const features = [];
+      if (dxf.entities && dxf.entities.length) {
+        dxf.entities.forEach(entity => {
+          if (entity.type === "LWPOLYLINE" || entity.type === "POLYLINE") {
+            let pts = [];
+            if (entity.type === "LWPOLYLINE") {
+              pts = (entity.vertices || []).map(v => [v.x, v.y, v.z || 0]);
+            } else if (entity.type === "POLYLINE") {
+              if (entity.vertices && entity.vertices.length) {
+                entity.vertices.forEach(vertex => {
+                  if (vertex.dxf && vertex.dxf.location) {
+                    pts.push([vertex.dxf.location.x, vertex.dxf.location.y, vertex.dxf.location.z || 0]);
+                  }
+                });
+              }
+            }
+            if (pts.length > 2) {
+              const closedFlag = (entity.closed === true || entity.isClosed === true);
+              const first = pts[0];
+              const last = pts[pts.length - 1];
+              const nearlyClosed = nearlyEqual(first[0], last[0]) && nearlyEqual(first[1], last[1]);
+              if (closedFlag || nearlyClosed) {
+                if (!nearlyClosed) {
+                  pts.push(first);
+                }
+                features.push({
+                  type: "Feature",
+                  geometry: {
+                    type: "Polygon",
+                    coordinates: [pts]
+                  },
+                  properties: { layer: entity.layer || "" }
+                });
+              }
+            }
+          }
+        });
+      }
+      return { type: "FeatureCollection", features: features };
+    }
+
+    // Globālie mainīgie
+    let csvData1, csvData2, geoData;
+    const cellSize = 0.1;
+    let globalDelaunay1_main, globalDelaunay2_main;
+    let tinLayer1, tinLayer2, resultLayer = null, layerControl = null, polygonNumberLayer = null;
+    let resultGeoJSON = null;
+    
+    // Jauns slānis – Ortofoto (izmantojot Esri World Imagery)
+    let ortoLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles © Esri',
+      maxZoom: 19
+    });
+    // Ortofoto slāni netiek pievienots kartē pēc noklusējuma
+
+    // Centroida aprēķins
+    function computeCentroid(ring) {
+      let sumX = 0, sumY = 0;
+      ring.forEach(pt => { sumX += pt[0]; sumY += pt[1]; });
+      return { x: sumX / ring.length, y: sumY / ring.length };
+    }
+
+    // DXF eksportēšanas funkcija
+    function geojsonToDXF(geojson) {
+      let dxf = "0\nSECTION\n2\nENTITIES\n";
+      geojson.features.forEach(feature => {
+        if (!feature.geometry) return;
+        if (feature.properties &&
+            typeof feature.properties.index !== "undefined" &&
+            typeof feature.properties.cut !== "undefined" &&
+            typeof feature.properties.fill !== "undefined" &&
+            typeof feature.properties.net !== "undefined") {
+          let centroid;
+          if (feature.geometry.type === "Polygon") {
+            centroid = computeCentroid(feature.geometry.coordinates[0]);
+          } else if (feature.geometry.type === "MultiPolygon") {
+            centroid = computeCentroid(feature.geometry.coordinates[0][0]);
+          }
+          if (centroid) {
+            let textHeight = 1, spacing = 1.2;
+            let textLine1 = "" + feature.properties.index;
+            let textLine2 = "cut: " + Number(feature.properties.cut).toFixed(3);
+            let textLine3 = "fill: " + Number(feature.properties.fill).toFixed(3);
+            let textLine4 = "net: " + Number(feature.properties.net).toFixed(3);
+            dxf += "0\nTEXT\n8\nINDEX\n10\n" + centroid.x + "\n20\n" + centroid.y + "\n30\n0\n40\n" + textHeight + "\n1\n" + textLine1 + "\n";
+            dxf += "0\nTEXT\n8\nCUT\n10\n" + centroid.x + "\n20\n" + (centroid.y - spacing) + "\n30\n0\n40\n" + textHeight + "\n1\n" + textLine2 + "\n";
+            dxf += "0\nTEXT\n8\nFILL\n10\n" + centroid.x + "\n20\n" + (centroid.y - 2 * spacing) + "\n30\n0\n40\n" + textHeight + "\n1\n" + textLine3 + "\n";
+            dxf += "0\nTEXT\n8\nNET\n10\n" + centroid.x + "\n20\n" + (centroid.y - 3 * spacing) + "\n30\n0\n40\n" + textHeight + "\n1\n" + textLine4 + "\n";
+          }
+        }
+        let polygons = [];
+        if (feature.geometry.type === "Polygon") {
+          polygons = [feature.geometry.coordinates];
+        } else if (feature.geometry.type === "MultiPolygon") {
+          polygons = feature.geometry.coordinates;
+        }
+        polygons.forEach(polygon => {
+          polygon.forEach(ring => {
+            let first = ring[0], last = ring[ring.length - 1];
+            if (first[0] !== last[0] || first[1] !== last[1]) {
+              ring.push(first);
+            }
+            dxf += "0\nPOLYLINE\n8\nKONTURAS\n66\n1\n70\n8\n";
+            ring.forEach(pt => {
+              dxf += "0\nVERTEX\n8\nKONTURAS\n10\n" + pt[0] + "\n20\n" + pt[1] + "\n30\n" + (pt[2] || 0) + "\n";
+            });
+            dxf += "0\nSEQEND\n8\nKONTURAS\n";
+          });
+        });
+      });
+      dxf += "0\nENDSEC\n0\nEOF\n";
+      return dxf;
+    }
+
+    // Worker koda saturs
+    const workerCode = `
+      importScripts("https://d3js.org/d3-delaunay.v6.min.js");
+      let globalCsvData1 = null, globalCsvData2 = null, globalDelaunay1 = null, globalDelaunay2 = null;
+      let globalTriangleMap1 = null, globalTriangleMap2 = null;
+      function buildPointTriangleMap(delaunay) {
+        const nPoints = delaunay.points.length / 2;
+        const map = new Array(nPoints);
+        for (let i = 0; i < nPoints; i++) { map[i] = []; }
+        const tris = delaunay.triangles;
+        for (let i = 0; i < tris.length; i += 3) {
+          const i0 = tris[i], i1 = tris[i+1], i2 = tris[i+2];
+          map[i0].push(i); map[i1].push(i); map[i2].push(i);
+        }
+        return map;
+      }
+      function pointInPolygon(point, vs) {
+        let x = point[0], y = point[1], inside = false;
+        for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+          let xi = vs[i][0], yi = vs[i][1], xj = vs[j][0], yj = vs[j][1];
+          let intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      }
+      function barycentricWeights(p, a, b, c) {
+        let det = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+        if (det === 0) return null;
+        let w0 = ((b[1] - c[1]) * (p[0] - c[0]) + (c[0] - b[0]) * (p[1] - c[1])) / det;
+        let w1 = ((c[1] - a[1]) * (p[0] - c[0]) + (a[0] - c[0]) * (p[1] - c[1])) / det;
+        return [w0, w1, 1 - w0 - w1];
+      }
+      function interpolateTIN(x, y, delaunay, data, triangleMap) {
+        const pts = delaunay.points, candidate = delaunay.find(x, y);
+        const candidateTriangles = triangleMap[candidate] || [];
+        for (let idx of candidateTriangles) {
+          let i0 = delaunay.triangles[idx], i1 = delaunay.triangles[idx+1], i2 = delaunay.triangles[idx+2];
+          let a = [pts[2*i0], pts[2*i0+1]], b = [pts[2*i1], pts[2*i1+1]], c = [pts[2*i2], pts[2*i2+1]];
+          let weights = barycentricWeights([x, y], a, b, c);
+          if (weights && weights.every(w => w >= 0)) {
+            return weights[0] * data[i0].z + weights[1] * data[i1].z + weights[2] * data[i2].z;
+          }
+        }
+        return undefined;
+      }
+      async function processFeature(feature, cellSize) {
+        const geom = feature.geometry;
+        if (!geom) return null;
+        let polygons = (geom.type === "Polygon") ? [geom.coordinates] : (geom.type === "MultiPolygon") ? geom.coordinates : [];
+        let fillFeature = 0, cutFeature = 0;
+        for (let poly of polygons) {
+          let outerRing = poly[0];
+          const xs = outerRing.map(pt => pt[0]), ys = outerRing.map(pt => pt[1]);
+          const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
+          if (minx === maxx || miny === maxy) continue;
+          const resX = Math.floor((maxx - minx) / cellSize) + 1, resY = Math.floor((maxy - miny) / cellSize) + 1;
+          const cellArea = cellSize * cellSize;
+          for (let i = 0; i < resX; i++) {
+            let x = minx + i * cellSize;
+            for (let j = 0; j < resY; j++) {
+              let y = miny + j * cellSize;
+              if (pointInPolygon([x, y], outerRing)) {
+                let z1 = interpolateTIN(x, y, globalDelaunay1, globalCsvData1, globalTriangleMap1);
+                let z2 = interpolateTIN(x, y, globalDelaunay2, globalCsvData2, globalTriangleMap2);
+                if (z1 !== undefined && z2 !== undefined) {
+                  let diff = (z2 - z1) * cellArea;
+                  if (diff > 0) fillFeature += diff; else if (diff < 0) cutFeature += -diff;
+                }
+              }
+            }
+          }
+        }
+        return { fill: fillFeature, cut: cutFeature, net: fillFeature - cutFeature };
+      }
+      onmessage = async function(e) {
+        const data = e.data;
+        if (data.type === "init") {
+          globalCsvData1 = data.csvData1;
+          globalCsvData2 = data.csvData2;
+          globalDelaunay1 = d3.Delaunay.from(globalCsvData1, d => d.x, d => d.y);
+          globalDelaunay2 = d3.Delaunay.from(globalCsvData2, d => d.x, d => d.y);
+          globalTriangleMap1 = buildPointTriangleMap(globalDelaunay1);
+          globalTriangleMap2 = buildPointTriangleMap(globalDelaunay2);
+          postMessage({ type: "init", status: "done" });
+        } else if (data.type === "task") {
+          const result = await processFeature(data.feature, data.cellSize);
+          postMessage({ type: "task", index: data.index, result: result });
+        }
+      };
+    `;
+    const blob = new Blob([workerCode], { type: "application/javascript" });
+    const workerBlobURL = URL.createObjectURL(blob);
+
+    // Inicializējam karti – noklusējuma bāzes slānis ir OpenStreetMap
+    const map = L.map('map').setView([56.95, 24.1], 7);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+
+    function reprojectGeoJSON(geojson) {
+      proj4.defs("EPSG:3059", "+proj=tmerc +lat_0=56.78 +lon_0=24.06 +k=0.9999 +x_0=500000 +y_0=500000 +ellps=GRS80 +units=m +no_defs");
+      const source = "EPSG:3059", dest = "EPSG:4326";
+      function reprojectCoords(coords) {
+        if (typeof coords[0] === 'number') return proj4(source, dest, coords);
+        else return coords.map(reprojectCoords);
+      }
+      const newGeoJSON = JSON.parse(JSON.stringify(geojson));
+      newGeoJSON.features.forEach(feature => {
+        feature.geometry.coordinates = reprojectCoords(feature.geometry.coordinates);
+      });
+      return newGeoJSON;
+    }
+
+    function addPolygonNumbers(geojson) {
+      const numberLayer = L.layerGroup();
+      geojson.features.forEach(feature => {
+        if (feature.geometry && (feature.geometry.type === "Polygon" || feature.geometry.type === "MultiPolygon")) {
+          let coords = (feature.geometry.type === "Polygon") ? feature.geometry.coordinates[0] : feature.geometry.coordinates[0][0];
+          let sumX = 0, sumY = 0;
+          coords.forEach(pt => { sumX += pt[0]; sumY += pt[1]; });
+          const avgX = sumX / coords.length, avgY = sumY / coords.length;
+          const marker = L.marker([avgY, avgX], { icon: L.divIcon({ className: 'polygon-number', html: feature.properties.index, iconSize: [20,20] }), interactive: false });
+          numberLayer.addLayer(marker);
+        }
+      });
+      return numberLayer;
+    }
+
+    // Funkcija, kas parāda rezultātu tabulu ar kopējiem aprēķiniem virs tās.
+    function displayResults(results) {
+      const outputDiv = document.getElementById("output");
+      
+      // Aprēķinām kopējos rezultātus
+      let totalCut = 0, totalFill = 0, totalNet = 0;
+      results.forEach(res => {
+        if (res) {
+          totalCut += res.cut;
+          totalFill += res.fill;
+          totalNet += res.net;
+        }
+      });
+      
+      // Veidojam kopējo rezultātu rindu
+      let summaryHtml = `<div style="margin-bottom:10px; font-weight:bold;">Kopā: Cut: ${totalCut.toFixed(3)} m³, Fill: ${totalFill.toFixed(3)} m³, Net: ${totalNet.toFixed(3)} m³</div>`;
+      
+      // Izveidojam tabulu ar detaļām un ievietojam to konteinerā ar fiksētu augstumu
+      let tableHtml = `<div class="result-table-container"><table><thead><tr><th>Polygon</th><th>Cut (m³)</th><th>Fill (m³)</th><th>Net (m³)</th></tr></thead><tbody>`;
+      results.forEach((res, idx) => {
+        tableHtml += "<tr><td>" + (idx+1) + "</td>";
+        if (res) {
+          tableHtml += "<td>" + res.cut.toFixed(3) + "</td>" +
+                       "<td>" + res.fill.toFixed(3) + "</td>" +
+                       "<td>" + res.net.toFixed(3) + "</td>";
+        } else {
+          tableHtml += "<td colspan='3'>Neapstrādājams objekts</td>";
+        }
+        tableHtml += "</tr>";
+      });
+      tableHtml += "</tbody></table></div>";
+      
+      outputDiv.innerHTML = summaryHtml + tableHtml;
+      
+      document.getElementById("map").style.display = "block";
+      map.invalidateSize();
+      
+      const outputGeoJSON = { type: "FeatureCollection", features: [] };
+      outputGeoJSON.crs = { type: "name", properties: { name: "EPSG:3059" } };
+      geoData.features.forEach((feature, i) => {
+        let newFeature = JSON.parse(JSON.stringify(feature));
+        newFeature.properties = newFeature.properties || {};
+        newFeature.properties.index = i+1;
+        if (results[i]) {
+          newFeature.properties.fill = results[i].fill;
+          newFeature.properties.cut = results[i].cut;
+          newFeature.properties.net = results[i].net;
+        } else {
+          newFeature.properties.error = "Neapstrādājams objekts";
+        }
+        outputGeoJSON.features.push(newFeature);
+      });
+      resultGeoJSON = outputGeoJSON;
+      
+      const downloadGeojsonBtn = document.getElementById("downloadGeojson");
+      downloadGeojsonBtn.style.display = "inline-block";
+      downloadGeojsonBtn.onclick = function() {
+        const geojsonStr = JSON.stringify(outputGeoJSON, null, 2);
+        const blob = new Blob([geojsonStr], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "result.geojson";
+        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+      };
+      
+      const downloadDXFBtn = document.getElementById("downloadDXF");
+      downloadDXFBtn.style.display = "inline-block";
+      downloadDXFBtn.onclick = function() {
+        const dxfStr = geojsonToDXF(outputGeoJSON);
+        const blob = new Blob([dxfStr], { type: "application/octet-stream" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "rezultati.dxf";
+        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+      };
+      
+      const reprojectedGeoJSON = reprojectGeoJSON(outputGeoJSON);
+      if (resultLayer) map.removeLayer(resultLayer);
+      resultLayer = L.geoJSON(reprojectedGeoJSON, {
+        style: feature => ({ color: 'red', weight: 2, fillOpacity: 0.3 }),
+        onEachFeature: (feature, layer) => {
+          let tooltipContent = feature.properties.error ? "Neapstrādājams objekts" :
+            "Cut: " + feature.properties.cut.toFixed(3) + " m³<br>" +
+            "Fill: " + feature.properties.fill.toFixed(3) + " m³<br>" +
+            "Net: " + feature.properties.net.toFixed(3) + " m³";
+          layer.bindTooltip(tooltipContent, { sticky: true });
+        }
+      }).addTo(map);
+      
+      polygonNumberLayer = addPolygonNumbers(reprojectedGeoJSON);
+      polygonNumberLayer.addTo(map);
+      
+      // Layer control – pēc noklusējuma ieslēgts ir tikai "Rezultātu slānis",
+      // Tādēļ TIN slāņi (Virsma 1 un Virsma 2) netiek pievienoti kartē pēc noklusējuma.
+      if (layerControl) map.removeControl(layerControl);
+      layerControl = L.control.layers(null, {
+        "Rezultātu slānis": resultLayer,
+        "Virsma 1": tinLayer1,
+        "Virsma 2": tinLayer2,
+        "Numerācija": polygonNumberLayer,
+        "Ortofoto": ortoLayer
+      }, { collapsed: false }).addTo(map);
+      map.fitBounds(resultLayer.getBounds());
+      
+      const downloadExcelBtn = document.getElementById("downloadExcel");
+      downloadExcelBtn.style.display = "inline-block";
+      downloadExcelBtn.onclick = function() {
+        const excelData = [];
+        results.forEach((res, idx) => {
+          if (res) {
+            excelData.push({ "Polygon": idx+1, "Cut (m³)": res.cut.toFixed(3), "Fill (m³)": res.fill.toFixed(3), "Net (m³)": res.net.toFixed(3) });
+          } else {
+            excelData.push({ "Polygon": idx+1, "Error": "Neapstrādājams objekts" });
+          }
+        });
+        const worksheet = XLSX.utils.json_to_sheet(excelData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Rezultāti");
+        const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'binary' });
+        function s2ab(s) { const buf = new ArrayBuffer(s.length); const view = new Uint8Array(buf); for (let i = 0; i < s.length; i++) view[i] = s.charCodeAt(i) & 0xFF; return buf; }
+        const blob = new Blob([s2ab(wbout)], { type: "application/octet-stream" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "rezultati.xlsx";
+        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+      };
+    }
+
+    function startWorkerPool() {
+      const features = geoData.features || [];
+      const totalTasks = features.length;
+      const resultsArray = new Array(totalTasks);
+      let nextTask = 0, completedTasks = 0;
+      const numWorkers = Math.min(navigator.hardwareConcurrency || 4, totalTasks);
+      logDebug("Izveidoju " + numWorkers + " workerus.");
+      const workers = [];
+      for (let i = 0; i < numWorkers; i++) {
+        const worker = new Worker(workerBlobURL);
+        worker.onmessage = function(e) {
+          const msg = e.data;
+          if (msg.type === "init") {
+            logDebug("Worker inicializēts.");
+            if (nextTask < totalTasks) {
+              worker.postMessage({ type: "task", feature: features[nextTask], index: nextTask, cellSize: cellSize });
+              nextTask++;
+            }
+          } else if (msg.type === "task") {
+            resultsArray[msg.index] = msg.result;
+            completedTasks++;
+            logDebug("Pabeigts feature indekss " + msg.index + " (" + completedTasks + "/" + totalTasks + ")");
+            if (nextTask < totalTasks) {
+              worker.postMessage({ type: "task", feature: features[nextTask], index: nextTask, cellSize: cellSize });
+              nextTask++;
+            } else {
+              worker.terminate();
+            }
+            if (completedTasks === totalTasks) {
+              logDebug("Visi feature apstrādāti.");
+              displayResults(resultsArray);
+            }
+          } else if (msg.type === "error") {
+            logDebug("Worker error: " + msg.message);
+          }
+        };
+        worker.onerror = function(e) { logDebug("Worker error: " + e.message); };
+        workers.push(worker);
+      }
+      workers.forEach(worker => {
+        worker.postMessage({ type: "init", csvData1: csvData1, csvData2: csvData2 });
+      });
+    }
+
+    document.getElementById("compute").addEventListener("click", function(){
+      const file1 = document.getElementById("csv1").files[0];
+      const file2 = document.getElementById("csv2").files[0];
+      const fileGeo = document.getElementById("geojson").files[0];
+      const outputDiv = document.getElementById("output");
+      document.getElementById("debug").innerHTML = "<strong>Debug:</strong><br>";
+      if (!file1 || !file2 || !fileGeo) {
+        outputDiv.innerHTML = "Lūdzu, atlasiet visus failus.";
+        return;
+      }
+      let readCount = 0;
+      function checkAllRead() {
+        readCount++;
+        if (readCount === 3) {
+          logDebug("Visi faili ielādēti.");
+          globalDelaunay1_main = d3.Delaunay.from(csvData1, d => d.x, d => d.y);
+          globalDelaunay2_main = d3.Delaunay.from(csvData2, d => d.x, d => d.y);
+          logDebug("TIN virsmas izveidotas.");
+          document.getElementById("downloadTIN1").style.display = "inline-block";
+          document.getElementById("downloadTIN2").style.display = "inline-block";
+          document.getElementById("downloadLandXML1").style.display = "inline-block";
+          document.getElementById("downloadLandXML2").style.display = "inline-block";
+          const geojsonTIN1 = delaunayToGeoJSON(globalDelaunay1_main, csvData1);
+          const geojsonTIN2 = delaunayToGeoJSON(globalDelaunay2_main, csvData2);
+          const reprojectedTIN1 = reprojectGeoJSON(geojsonTIN1);
+          const reprojectedTIN2 = reprojectGeoJSON(geojsonTIN2);
+          // TIN slāņi netiek pievienoti kartē pēc noklusējuma
+          tinLayer1 = L.geoJSON(reprojectedTIN1, { style: { color: 'blue', weight: 1, opacity: 0.5 } });
+          tinLayer2 = L.geoJSON(reprojectedTIN2, { style: { color: 'green', weight: 1, opacity: 0.5 } });
+          logDebug("Sāku workeru apstrādi...");
+          startWorkerPool();
+        }
+      }
+      const reader1 = new FileReader();
+      reader1.onload = function(e) { csvData1 = parseCSV(e.target.result); logDebug("CSV 1 ielādēts (" + csvData1.length + " punktu)."); checkAllRead(); };
+      const reader2 = new FileReader();
+      reader2.onload = function(e) { csvData2 = parseCSV(e.target.result); logDebug("CSV 2 ielādēts (" + csvData2.length + " punktu)."); checkAllRead(); };
+      const readerGeo = new FileReader();
+      readerGeo.onload = function(e) {
+        const fileName = fileGeo.name.toLowerCase();
+        try {
+          if (fileName.endsWith(".dxf")) {
+            geoData = parseDXFToGeoJSON(e.target.result);
+            logDebug("DXF fails parsēts un pārveidots uz GeoJSON (" + (geoData.features ? geoData.features.length : 0) + " feature).");
+          } else {
+            geoData = JSON.parse(e.target.result);
+            logDebug("GeoJSON fails ielādēts (" + (geoData.features ? geoData.features.length : 0) + " feature).");
+          }
+        } catch(err) {
+          outputDiv.innerHTML = "Faila parsēšana neizdevās: " + err;
+          return;
+        }
+        checkAllRead();
+      };
+      reader1.readAsText(file1);
+      reader2.readAsText(file2);
+      readerGeo.readAsText(fileGeo);
+    });
+
+    document.getElementById("downloadTIN1").addEventListener("click", function(){
+      if (!globalDelaunay1_main || !csvData1) { logDebug("CSV1 vai TIN 1 nav pieejams."); return; }
+      const geojsonTIN1 = delaunayToGeoJSON(globalDelaunay1_main, csvData1);
+      const blob = new Blob([JSON.stringify(geojsonTIN1, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "Virsma1_GeoJSON.geojson";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    });
+
+    document.getElementById("downloadTIN2").addEventListener("click", function(){
+      if (!globalDelaunay2_main || !csvData2) { logDebug("CSV2 vai TIN 2 nav pieejams."); return; }
+      const geojsonTIN2 = delaunayToGeoJSON(globalDelaunay2_main, csvData2);
+      const blob = new Blob([JSON.stringify(geojsonTIN2, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "Virsma2_GeoJSON.geojson";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    });
+
+    document.getElementById("downloadLandXML1").addEventListener("click", function(){
+      if (!globalDelaunay1_main || !csvData1) { logDebug("CSV1 vai TIN 1 nav pieejams."); return; }
+      const landxmlStr = delaunayToLandXML(globalDelaunay1_main, csvData1, "Virsma 1");
+      const blob = new Blob([landxmlStr], { type: "application/xml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "Virsma1_LandXML.xml";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    });
+
+    document.getElementById("downloadLandXML2").addEventListener("click", function(){
+      if (!globalDelaunay2_main || !csvData2) { logDebug("CSV2 vai TIN 2 nav pieejams."); return; }
+      const landxmlStr = delaunayToLandXML(globalDelaunay2_main, csvData2, "Virsma 2");
+      const blob = new Blob([landxmlStr], { type: "application/xml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "Virsma2_LandXML.xml";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>
