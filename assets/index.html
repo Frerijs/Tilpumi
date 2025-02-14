@@ -1,76 +1,257 @@
 <!DOCTYPE html>
 <html lang="lv">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8">
   <title>Tilpumu aprēķins</title>
   
-  <!-- Iekļaujam d3-delaunay -->
-  <script src="https://d3js.org/d3-delaunay.v6.min.js"></script>
-  
-  <!-- Iekļaujam Leaflet CSS -->
+  <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" crossorigin=""/>
-  
-  <!-- Iekļaujam Leaflet JS -->
-  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js" crossorigin=""></script>
-  
-  <!-- Iekļaujam proj4 un proj4leaflet -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.0/proj4.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4leaflet/1.0.2/proj4leaflet.js"></script>
-  
-  <!-- Iekļaujam SheetJS (xlsx) bibliotēku Excel faila izveidei -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  
-  <!-- Iekļaujam dxf-parser (versija 1.1.2) DXF faila parsēšanai -->
-  <script src="https://unpkg.com/dxf-parser@1.1.2/dist/dxf-parser.js"></script>
-  
+
   <style>
-    body { font-family: sans-serif; margin: 1rem; }
-    h1 { font-size: 1.5rem; margin-bottom: 1rem; }
-    label { display: block; margin-top: 0.5rem; }
-    input[type="file"], input[type="number"] { margin-bottom: 1rem; }
-    button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
-    #output { margin-top: 1rem; }
-    #debug { margin-top: 1rem; padding: 1rem; background: #f0f0f0; border: 1px solid #ccc; max-height: 200px; overflow-y: auto; font-size: 0.9rem; }
-    #map { height: 800px; margin-top: 1rem; border: 1px solid #ccc; display: none; }
-    .polygon-number { background: rgba(255,255,255,0.8); border: 1px solid #333; border-radius: 50%; text-align: center; font-weight: bold; color: #333; }
-    .result-table-container { height: 300px; overflow-y: auto; }
-    table { width: 100%; border-collapse: collapse; margin: 0; }
-    table, th, td { border: 1px solid #ccc; }
-    th, td { padding: 0.5rem; text-align: center; }
-    th { background: #eee; position: sticky; top: 0; z-index: 1; }
-    table thead th { position: sticky; top: 0; background: #eee; z-index: 1; }
+    /* BĀZES STILI (gaišie) */
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 20px;
+      background-color: #f8f9fa;
+      color: #262730;
+    }
+    h1 {
+      font-size: 2em;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    label, p, strong {
+      font-size: 1em;
+    }
+    input[type="file"], input[type="number"] {
+      padding: 8px;
+      margin-bottom: 10px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      width: 100%;
+      box-sizing: border-box;
+      font-size: 14px;
+    }
+    button {
+      background-color: #0099ff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      font-size: 16px;
+      margin: 4px 2px;
+      cursor: pointer;
+      border-radius: 5px;
+      transition: background-color 0.3s ease;
+    }
+    button:hover {
+      background-color: #007acc;
+    }
+    .download-link {
+      text-decoration: none;
+      background-color: #28a745;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 5px;
+      font-size: 16px;
+      display: inline-block;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+    .download-link:hover {
+      background-color: #218838;
+    }
+    .button-container {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+    .legend {
+      padding: 8px;
+      background-color: white;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      margin-top: 20px;
+      line-height: 18px;
+      color: #555;
+    }
+    .legend i {
+      width: 18px;
+      height: 18px;
+      float: left;
+      margin-right: 8px;
+      opacity: 0.7;
+    }
+    #map {
+      height: 800px;
+      margin-top: 20px;
+      border: 1px solid #ccc;
+      display: none;
+    }
+    /* Debug un rezultātu tabulas stili */
+    #debug {
+      margin-top: 20px;
+      padding: 10px;
+      background: #f0f0f0;
+      border: 1px solid #ccc;
+      max-height: 200px;
+      overflow-y: auto;
+      font-size: 0.9rem;
+    }
+    .polygon-number {
+      background: rgba(255,255,255,0.8);
+      border: 1px solid #333;
+      border-radius: 50%;
+      text-align: center;
+      font-weight: bold;
+      color: #333;
+    }
+    .result-table-container {
+      height: 300px;
+      overflow-y: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0;
+    }
+    table, th, td {
+      border: 1px solid #ccc;
+    }
+    th, td {
+      padding: 0.5rem;
+      text-align: center;
+    }
+    th {
+      background: #eee;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    
+    /* TUMŠAIS REŽĪMS */
+    body.dark-mode {
+      background-color: #121212;
+      color: #ffffff;
+    }
+    body.dark-mode h1,
+    body.dark-mode p,
+    body.dark-mode label,
+    body.dark-mode strong {
+      color: #fff;
+    }
+    body.dark-mode input[type="file"],
+    body.dark-mode input[type="number"] {
+      background-color: #2b2b2b;
+      color: #ffffff;
+      border: 1px solid #444;
+    }
+    body.dark-mode button {
+      background-color: #0066cc;
+    }
+    body.dark-mode #debug {
+      background: #2b2b2b;
+      border-color: #444;
+      color: #ccc;
+    }
+    body.dark-mode .legend {
+      background-color: #1e1e1e;
+      border-color: #444;
+      color: #ccc;
+    }
+    body.dark-mode .leaflet-control-layers-expanded {
+      background: #2b2b2b;
+      color: #ccc;
+    }
+    body.dark-mode .leaflet-popup-content-wrapper {
+      background: #2b2b2b;
+      color: #ccc;
+    }
+    body.dark-mode .leaflet-popup-tip-container {
+      opacity: 0.7;
+    }
+    /* Jaunais stils tabulas galvenēm tumšajā režīmā */
+    body.dark-mode table thead th {
+      background-color: #2B2B2B;
+      color: #ccc;
+    }
+    .dark-mode-switch-container {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: rgba(255, 255, 255, 0.8);
+      padding: 5px 10px;
+      border-radius: 20px;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    body.dark-mode .dark-mode-switch-container {
+      background: rgba(0, 0, 0, 0.5);
+    }
+    #darkModeSwitch {
+      transform: scale(1.3);
+      cursor: pointer;
+    }
+    .dark-mode-switch-label {
+      font-weight: 500;
+      cursor: pointer;
+      user-select: none;
+    }
   </style>
 </head>
 <body>
+  <!-- Tumšā režīma slēdzis -->
+  <div class="dark-mode-switch-container">
+    <label for="darkModeSwitch" class="dark-mode-switch-label">Tumšais režīms</label>
+    <input type="checkbox" id="darkModeSwitch" />
+  </div>
+
   <h1>Tilpumu aprēķins</h1>
-  <div>
-    <label>1. CSV (x,y,z) – virsma 1:
+  <div id="input-container">
+    <label><strong>1. CSV (x,y,z) – virsma 1:</strong>
       <input type="file" id="csv1" accept=".csv">
     </label>
-    <label>2. CSV (x,y,z) – virsma 2:
+    <label><strong>2. CSV (x,y,z) – virsma 2:</strong>
       <input type="file" id="csv2" accept=".csv">
     </label>
-    <label>3. Kontūras *.DXF vai *.GeoJSON:
+    <label><strong>3. Kontūras (*.DXF vai *.GeoJSON):</strong>
       <input type="file" id="geojson" accept=".geojson,.json,.dxf">
     </label>
-    <label>Ievadiet zīmes aiz komata (noklusējuma 1):
+    <label><strong>Ievadiet zīmes aiz komata (noklusējums 1):</strong>
       <input type="number" id="decimalCount" value="1" min="0" style="width:60px;">
     </label>
-    <button id="compute">Aprēķināt tilpumu</button>
+    <div class="button-container">
+      <button id="compute">Aprēķināt tilpumu</button>
+    </div>
   </div>
-  
+
   <div id="output"></div>
-  <button id="downloadGeojson" style="display:none;">Lejuplādēt rezultātu *.GeoJSON</button>
-  <button id="downloadTIN1" style="display:none;">Lejuplādēt VIRSMA 1 *.GeoJSON</button>
-  <button id="downloadTIN2" style="display:none;">Lejuplādēt VIRSMA 2 *.GeoJSON</button>
-  <button id="downloadLandXML1" style="display:none;">Lejuplādēt VIRSMA 1 *.LandXML</button>
-  <button id="downloadLandXML2" style="display:none;">Lejuplādēt VIRSMA 1 *.LandXML</button>
-  <button id="downloadExcel" style="display:none;">Lejuplādēt tabulas datus *.xlsx (Excel)</button>
-  <button id="downloadDXF" style="display:none;">Lejuplādēt rezultātus *.DXF (darbojas Microstation)</button>
   
+  <div class="button-container">
+    <button id="downloadGeojson" style="display:none;">Lejuplādēt rezultātu *.GeoJSON</button>
+    <button id="downloadTIN1" style="display:none;">Lejuplādēt VIRSMA 1 *.GeoJSON</button>
+    <button id="downloadTIN2" style="display:none;">Lejuplādēt VIRSMA 2 *.GeoJSON</button>
+    <button id="downloadLandXML1" style="display:none;">Lejuplādēt VIRSMA 1 *.LandXML</button>
+    <button id="downloadLandXML2" style="display:none;">Lejuplādēt VIRSMA 2 *.LandXML</button>
+    <button id="downloadExcel" style="display:none;">Lejuplādēt tabulas datus *.xlsx (Excel)</button>
+    <button id="downloadDXF" style="display:none;">Lejuplādēt rezultātus *.DXF</button>
+  </div>
+
   <div id="map"></div>
   <div id="debug"><strong>Debug:</strong><br></div>
 
+  <!-- Iekļaujam nepieciešamās bibliotēkas -->
+  <script src="https://d3js.org/d3-delaunay.v6.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.0/proj4.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4leaflet/1.0.2/proj4leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://unpkg.com/dxf-parser@1.1.2/dist/dxf-parser.js"></script>
+
+  <!-- Galvenais skripts -->
   <script>
     // Palīgfunkcija – logēšana
     function logDebug(message) {
@@ -115,11 +296,11 @@
       return { type: "FeatureCollection", features: features, crs: { type: "name", properties: { name: "EPSG:3059" } } };
     }
 
-    // LandXML eksportēšanas funkcija ar apmainītām x un y koordinātēm
+    // LandXML eksportēšanas funkcija ar apmainītām koordinātēm
     function delaunayToLandXML(delaunay, csvData, surfaceName) {
       let now = new Date();
-      let dateStr = now.toISOString().split("T")[0]; // "YYYY-MM-DD"
-      let timeStr = now.toTimeString().split(" ")[0]; // "HH:MM:SS"
+      let dateStr = now.toISOString().split("T")[0];
+      let timeStr = now.toTimeString().split(" ")[0];
 
       let xml = `<?xml version="1.0" encoding="iso-8859-4" ?>\n`;
       xml += `<LandXML xmlns="http://www.landxml.org/schema/LandXML-1.0" `;
@@ -138,11 +319,9 @@
       xml += `  <Surfaces>\n`;
       xml += `    <Surface name="${surfaceName}" state="proposed">\n`;
       
-      // SourceData ar PntList3D – visi CSV punkti (apmainot x un y)
       xml += `      <SourceData>\n`;
       xml += `        <DataPoints name="pkt" DTMAttribute="spot">\n`;
       xml += `          <PntList3D>\n`;
-      // Apmainām x un y: izmantojam pt.y kā x un pt.x kā y
       let pntList = csvData.map(pt => `${pt.y} ${pt.x} ${pt.z}`).join("  ");
       xml += `              ${pntList}\n`;
       xml += `          </PntList3D>\n`;
@@ -155,7 +334,6 @@
       xml += `        </DataPoints>\n`;
       xml += `      </SourceData>\n`;
       
-      // TIN definīcija: Punti un sešu trijstūri (apmainām koordinātes arī šeit)
       xml += `      <Definition surfType="TIN">\n`;
       xml += `        <Pnts>\n`;
       for (let i = 0; i < csvData.length; i++) {
@@ -189,12 +367,12 @@
       return xml;
     }
 
-    // Tolerances funkcija – salīdzināšanai
+    // Tolerance funkcija
     function nearlyEqual(a, b, tolerance = 0.001) {
       return Math.abs(a - b) < tolerance;
     }
 
-    // DXF parsēšanas funkcija
+    // DXF faila parsēšana uz GeoJSON
     function parseDXFToGeoJSON(dxfText) {
       let parser = new DxfParser();
       let dxf;
@@ -252,21 +430,20 @@
     let tinLayer1, tinLayer2, resultLayer = null, layerControl = null, polygonNumberLayer = null;
     let resultGeoJSON = null;
     
-    // Jauns slānis – Ortofoto (izmantojot Esri World Imagery)
+    // Ortofoto slānis
     let ortoLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       attribution: 'Tiles © Esri',
       maxZoom: 19
     });
-    // Ortofoto slāni netiek pievienots kartē pēc noklusējuma
-
+    
     // Centroida aprēķins
     function computeCentroid(ring) {
       let sumX = 0, sumY = 0;
       ring.forEach(pt => { sumX += pt[0]; sumY += pt[1]; });
       return { x: sumX / ring.length, y: sumY / ring.length };
     }
-
-    // DXF eksportēšanas funkcija – izmanto decimāldaļu skaitu no ievades lauka
+    
+    // DXF eksportēšana
     function geojsonToDXF(geojson) {
       let decimals = parseInt(document.getElementById("decimalCount").value) || 1;
       let dxf = "0\nSECTION\n2\nENTITIES\n";
@@ -318,7 +495,7 @@
       dxf += "0\nENDSEC\n0\nEOF\n";
       return dxf;
     }
-
+    
     // Worker koda saturs
     const workerCode = `
       importScripts("https://d3js.org/d3-delaunay.v6.min.js");
@@ -445,16 +622,11 @@
       return numberLayer;
     }
 
-    // Funkcija, kas parāda rezultātu tabulu ar kopējiem aprēķiniem virs tās.
-    // Rezultātu formatēšanas precizitāti nosaka ievades lauks "decimalCount"
+    // Parāda rezultātu tabulu ar kopējiem aprēķiniem
     function displayResults(results) {
       const outputDiv = document.getElementById("output");
-      
-      // Nolasa decimāldaļu skaitu no ievades lauka (ja nav norādīts, tad 1)
       let decimals = parseInt(document.getElementById("decimalCount").value);
       if (isNaN(decimals) || decimals < 0) decimals = 1;
-      
-      // Aprēķinām kopējos rezultātus
       let totalCut = 0, totalFill = 0, totalNet = 0;
       results.forEach(res => {
         if (res) {
@@ -463,11 +635,7 @@
           totalNet += res.net;
         }
       });
-      
-      // Veidojam kopējo rezultātu rindu
       let summaryHtml = `<div style="margin-bottom:10px; font-weight:bold;">Kopā: Cut: ${totalCut.toFixed(decimals)} m³, Fill: ${totalFill.toFixed(decimals)} m³, Net: ${totalNet.toFixed(decimals)} m³</div>`;
-      
-      // Izveidojam tabulu ar detaļām un ievietojam to konteinerā ar fiksētu augstumu (300px)
       let tableHtml = `<div class="result-table-container"><table><thead><tr><th>Polygon</th><th>Cut (m³)</th><th>Fill (m³)</th><th>Net (m³)</th></tr></thead><tbody>`;
       results.forEach((res, idx) => {
         tableHtml += "<tr><td>" + (idx+1) + "</td>";
@@ -481,12 +649,9 @@
         tableHtml += "</tr>";
       });
       tableHtml += "</tbody></table></div>";
-      
       outputDiv.innerHTML = summaryHtml + tableHtml;
-      
       document.getElementById("map").style.display = "block";
       map.invalidateSize();
-      
       const outputGeoJSON = { type: "FeatureCollection", features: [] };
       outputGeoJSON.crs = { type: "name", properties: { name: "EPSG:3059" } };
       geoData.features.forEach((feature, i) => {
@@ -503,7 +668,6 @@
         outputGeoJSON.features.push(newFeature);
       });
       resultGeoJSON = outputGeoJSON;
-      
       const downloadGeojsonBtn = document.getElementById("downloadGeojson");
       downloadGeojsonBtn.style.display = "inline-block";
       downloadGeojsonBtn.onclick = function() {
@@ -514,7 +678,6 @@
         a.href = url; a.download = "result.geojson";
         document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       };
-      
       const downloadDXFBtn = document.getElementById("downloadDXF");
       downloadDXFBtn.style.display = "inline-block";
       downloadDXFBtn.onclick = function() {
@@ -525,7 +688,6 @@
         a.href = url; a.download = "rezultati.dxf";
         document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       };
-      
       const reprojectedGeoJSON = reprojectGeoJSON(outputGeoJSON);
       if (resultLayer) map.removeLayer(resultLayer);
       resultLayer = L.geoJSON(reprojectedGeoJSON, {
@@ -538,12 +700,8 @@
           layer.bindTooltip(tooltipContent, { sticky: true });
         }
       }).addTo(map);
-      
       polygonNumberLayer = addPolygonNumbers(reprojectedGeoJSON);
       polygonNumberLayer.addTo(map);
-      
-      // Layer control – pēc noklusējuma ieslēgts ir tikai "Rezultātu slānis",
-      // Tādēļ "Virsma 1" un "Virsma 2" netiek pievienoti kartē pēc noklusējuma.
       if (layerControl) map.removeControl(layerControl);
       layerControl = L.control.layers(null, {
         "Rezultātu slānis": resultLayer,
@@ -553,7 +711,6 @@
         "Ortofoto": ortoLayer
       }, { collapsed: false }).addTo(map);
       map.fitBounds(resultLayer.getBounds());
-      
       const downloadExcelBtn = document.getElementById("downloadExcel");
       downloadExcelBtn.style.display = "inline-block";
       downloadExcelBtn.onclick = function() {
@@ -577,7 +734,7 @@
         document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       };
     }
-
+    
     function startWorkerPool() {
       const features = geoData.features || [];
       const totalTasks = features.length;
@@ -621,7 +778,7 @@
         worker.postMessage({ type: "init", csvData1: csvData1, csvData2: csvData2 });
       });
     }
-
+    
     document.getElementById("compute").addEventListener("click", function(){
       const file1 = document.getElementById("csv1").files[0];
       const file2 = document.getElementById("csv2").files[0];
@@ -648,7 +805,6 @@
           const geojsonTIN2 = delaunayToGeoJSON(globalDelaunay2_main, csvData2);
           const reprojectedTIN1 = reprojectGeoJSON(geojsonTIN1);
           const reprojectedTIN2 = reprojectGeoJSON(geojsonTIN2);
-          // TIN slāņi netiek pievienoti kartē pēc noklusējuma
           tinLayer1 = L.geoJSON(reprojectedTIN1, { style: { color: 'blue', weight: 1, opacity: 0.5 } });
           tinLayer2 = L.geoJSON(reprojectedTIN2, { style: { color: 'green', weight: 1, opacity: 0.5 } });
           logDebug("Sāku workeru apstrādi...");
@@ -719,6 +875,13 @@
       const a = document.createElement("a");
       a.href = url; a.download = "Virsma2_LandXML.xml";
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    });
+  </script>
+
+  <script>
+    // Tumšā režīma slēdzis
+    document.getElementById('darkModeSwitch').addEventListener('change', function() {
+      document.body.classList.toggle('dark-mode', this.checked);
     });
   </script>
 </body>
