@@ -60,6 +60,14 @@
     .download-link:hover {
       background-color: #218838;
     }
+    /* Ja tumšajā režīmā arī lejuplādes pogām jābūt tādām pašām */
+    body.dark-mode .download-link {
+      background-color: #28a745;
+      color: white;
+    }
+    body.dark-mode .download-link:hover {
+      background-color: #218838;
+    }
     .button-container {
       display: flex;
       align-items: center;
@@ -231,13 +239,13 @@
   <div id="output"></div>
   
   <div class="button-container">
-    <button id="downloadGeojson" style="display:none;">Lejuplādēt rezultātu *.GeoJSON</button>
-    <button id="downloadTIN1" style="display:none;">Lejuplādēt VIRSMA 1 *.GeoJSON</button>
-    <button id="downloadTIN2" style="display:none;">Lejuplādēt VIRSMA 2 *.GeoJSON</button>
-    <button id="downloadLandXML1" style="display:none;">Lejuplādēt VIRSMA 1 *.LandXML</button>
-    <button id="downloadLandXML2" style="display:none;">Lejuplādēt VIRSMA 2 *.LandXML</button>
-    <button id="downloadExcel" style="display:none;">Lejuplādēt tabulas datus *.xlsx (Excel)</button>
-    <button id="downloadDXF" style="display:none;">Lejuplādēt rezultātus *.DXF</button>
+    <button id="downloadGeojson" class="download-link" style="display:none;">Lejuplādēt rezultātu *.GeoJSON</button>
+    <button id="downloadTIN1" class="download-link" style="display:none;">Lejuplādēt VIRSMA 1 *.GeoJSON</button>
+    <button id="downloadTIN2" class="download-link" style="display:none;">Lejuplādēt VIRSMA 2 *.GeoJSON</button>
+    <button id="downloadLandXML1" class="download-link" style="display:none;">Lejuplādēt VIRSMA 1 *.LandXML</button>
+    <button id="downloadLandXML2" class="download-link" style="display:none;">Lejuplādēt VIRSMA 2 *.LandXML</button>
+    <button id="downloadExcel" class="download-link" style="display:none;">Lejuplādēt tabulas datus *.xlsx (Excel)</button>
+    <button id="downloadDXF" class="download-link" style="display:none;">Lejuplādēt rezultātus *.DXF</button>
   </div>
 
   <div id="map"></div>
