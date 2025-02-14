@@ -27,7 +27,7 @@
     body { font-family: sans-serif; margin: 1rem; }
     h1 { font-size: 1.5rem; margin-bottom: 1rem; }
     label { display: block; margin-top: 0.5rem; }
-    input[type="file"] { margin-bottom: 1rem; }
+    input[type="file"], input[type="number"] { margin-bottom: 1rem; }
     button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
     #output { margin-top: 1rem; }
     #debug { margin-top: 1rem; padding: 1rem; background: #f0f0f0; border: 1px solid #ccc; max-height: 200px; overflow-y: auto; font-size: 0.9rem; }
@@ -52,6 +52,9 @@
     </label>
     <label>3. Kontūras *.DXF vai *.GeoJSON:
       <input type="file" id="geojson" accept=".geojson,.json,.dxf">
+    </label>
+    <label>Ievadiet zīmes aiz komata (noklusējuma 1):
+      <input type="number" id="decimalCount" value="1" min="0" style="width:60px;">
     </label>
     <button id="compute">Aprēķināt tilpumu</button>
   </div>
@@ -263,8 +266,9 @@
       return { x: sumX / ring.length, y: sumY / ring.length };
     }
 
-    // DXF eksportēšanas funkcija
+    // DXF eksportēšanas funkcija – izmanto decimāldaļu skaitu no ievades lauka
     function geojsonToDXF(geojson) {
+      let decimals = parseInt(document.getElementById("decimalCount").value) || 1;
       let dxf = "0\nSECTION\n2\nENTITIES\n";
       geojson.features.forEach(feature => {
         if (!feature.geometry) return;
@@ -282,13 +286,13 @@
           if (centroid) {
             let textHeight = 1, spacing = 1.2;
             let textLine1 = "" + feature.properties.index;
-            let textLine2 = "cut: " + Number(feature.properties.cut).toFixed(3);
-            let textLine3 = "fill: " + Number(feature.properties.fill).toFixed(3);
-            let textLine4 = "net: " + Number(feature.properties.net).toFixed(3);
-            dxf += "0\nTEXT\n8\nINDEX\n10\n" + centroid.x + "\n20\n" + centroid.y + "\n30\n0\n40\n" + textHeight + "\n1\n" + textLine1 + "\n";
-            dxf += "0\nTEXT\n8\nCUT\n10\n" + centroid.x + "\n20\n" + (centroid.y - spacing) + "\n30\n0\n40\n" + textHeight + "\n1\n" + textLine2 + "\n";
-            dxf += "0\nTEXT\n8\nFILL\n10\n" + centroid.x + "\n20\n" + (centroid.y - 2 * spacing) + "\n30\n0\n40\n" + textHeight + "\n1\n" + textLine3 + "\n";
-            dxf += "0\nTEXT\n8\nNET\n10\n" + centroid.x + "\n20\n" + (centroid.y - 3 * spacing) + "\n30\n0\n40\n" + textHeight + "\n1\n" + textLine4 + "\n";
+            let textLine2 = "cut: " + Number(feature.properties.cut).toFixed(decimals);
+            let textLine3 = "fill: " + Number(feature.properties.fill).toFixed(decimals);
+            let textLine4 = "net: " + Number(feature.properties.net).toFixed(decimals);
+            dxf += "0\nTEXT\n8\nINDEX\n10\n" + centroid.x.toFixed(decimals) + "\n20\n" + centroid.y.toFixed(decimals) + "\n30\n0\n40\n" + textHeight + "\n1\n" + textLine1 + "\n";
+            dxf += "0\nTEXT\n8\nCUT\n10\n" + centroid.x.toFixed(decimals) + "\n20\n" + (centroid.y - spacing).toFixed(decimals) + "\n30\n0\n40\n" + textHeight + "\n1\n" + textLine2 + "\n";
+            dxf += "0\nTEXT\n8\nFILL\n10\n" + centroid.x.toFixed(decimals) + "\n20\n" + (centroid.y - 2 * spacing).toFixed(decimals) + "\n30\n0\n40\n" + textHeight + "\n1\n" + textLine3 + "\n";
+            dxf += "0\nTEXT\n8\nNET\n10\n" + centroid.x.toFixed(decimals) + "\n20\n" + (centroid.y - 3 * spacing).toFixed(decimals) + "\n30\n0\n40\n" + textHeight + "\n1\n" + textLine4 + "\n";
           }
         }
         let polygons = [];
@@ -305,7 +309,7 @@
             }
             dxf += "0\nPOLYLINE\n8\nKONTURAS\n66\n1\n70\n8\n";
             ring.forEach(pt => {
-              dxf += "0\nVERTEX\n8\nKONTURAS\n10\n" + pt[0] + "\n20\n" + pt[1] + "\n30\n" + (pt[2] || 0) + "\n";
+              dxf += "0\nVERTEX\n8\nKONTURAS\n10\n" + pt[0].toFixed(decimals) + "\n20\n" + pt[1].toFixed(decimals) + "\n30\n" + (pt[2] || 0) + "\n";
             });
             dxf += "0\nSEQEND\n8\nKONTURAS\n";
           });
@@ -442,8 +446,13 @@
     }
 
     // Funkcija, kas parāda rezultātu tabulu ar kopējiem aprēķiniem virs tās.
+    // Rezultātu formatēšanas precizitāti nosaka ievades lauks "decimalCount"
     function displayResults(results) {
       const outputDiv = document.getElementById("output");
+      
+      // Nolasa decimāldaļu skaitu no ievades lauka (ja nav norādīts, tad 1)
+      let decimals = parseInt(document.getElementById("decimalCount").value);
+      if (isNaN(decimals) || decimals < 0) decimals = 1;
       
       // Aprēķinām kopējos rezultātus
       let totalCut = 0, totalFill = 0, totalNet = 0;
@@ -456,16 +465,16 @@
       });
       
       // Veidojam kopējo rezultātu rindu
-      let summaryHtml = `<div style="margin-bottom:10px; font-weight:bold;">Kopā: Cut: ${totalCut.toFixed(3)} m³, Fill: ${totalFill.toFixed(3)} m³, Net: ${totalNet.toFixed(3)} m³</div>`;
+      let summaryHtml = `<div style="margin-bottom:10px; font-weight:bold;">Kopā: Cut: ${totalCut.toFixed(decimals)} m³, Fill: ${totalFill.toFixed(decimals)} m³, Net: ${totalNet.toFixed(decimals)} m³</div>`;
       
-      // Izveidojam tabulu ar detaļām un ievietojam to konteinerā ar fiksētu augstumu
+      // Izveidojam tabulu ar detaļām un ievietojam to konteinerā ar fiksētu augstumu (300px)
       let tableHtml = `<div class="result-table-container"><table><thead><tr><th>Polygon</th><th>Cut (m³)</th><th>Fill (m³)</th><th>Net (m³)</th></tr></thead><tbody>`;
       results.forEach((res, idx) => {
         tableHtml += "<tr><td>" + (idx+1) + "</td>";
         if (res) {
-          tableHtml += "<td>" + res.cut.toFixed(3) + "</td>" +
-                       "<td>" + res.fill.toFixed(3) + "</td>" +
-                       "<td>" + res.net.toFixed(3) + "</td>";
+          tableHtml += "<td>" + res.cut.toFixed(decimals) + "</td>" +
+                       "<td>" + res.fill.toFixed(decimals) + "</td>" +
+                       "<td>" + res.net.toFixed(decimals) + "</td>";
         } else {
           tableHtml += "<td colspan='3'>Neapstrādājams objekts</td>";
         }
@@ -523,9 +532,9 @@
         style: feature => ({ color: 'red', weight: 2, fillOpacity: 0.3 }),
         onEachFeature: (feature, layer) => {
           let tooltipContent = feature.properties.error ? "Neapstrādājams objekts" :
-            "Cut: " + feature.properties.cut.toFixed(3) + " m³<br>" +
-            "Fill: " + feature.properties.fill.toFixed(3) + " m³<br>" +
-            "Net: " + feature.properties.net.toFixed(3) + " m³";
+            "Cut: " + feature.properties.cut.toFixed(decimals) + " m³<br>" +
+            "Fill: " + feature.properties.fill.toFixed(decimals) + " m³<br>" +
+            "Net: " + feature.properties.net.toFixed(decimals) + " m³";
           layer.bindTooltip(tooltipContent, { sticky: true });
         }
       }).addTo(map);
@@ -534,7 +543,7 @@
       polygonNumberLayer.addTo(map);
       
       // Layer control – pēc noklusējuma ieslēgts ir tikai "Rezultātu slānis",
-      // Tādēļ TIN slāņi (Virsma 1 un Virsma 2) netiek pievienoti kartē pēc noklusējuma.
+      // Tādēļ "Virsma 1" un "Virsma 2" netiek pievienoti kartē pēc noklusējuma.
       if (layerControl) map.removeControl(layerControl);
       layerControl = L.control.layers(null, {
         "Rezultātu slānis": resultLayer,
@@ -551,7 +560,7 @@
         const excelData = [];
         results.forEach((res, idx) => {
           if (res) {
-            excelData.push({ "Polygon": idx+1, "Cut (m³)": res.cut.toFixed(3), "Fill (m³)": res.fill.toFixed(3), "Net (m³)": res.net.toFixed(3) });
+            excelData.push({ "Polygon": idx+1, "Cut (m³)": res.cut.toFixed(decimals), "Fill (m³)": res.fill.toFixed(decimals), "Net (m³)": res.net.toFixed(decimals) });
           } else {
             excelData.push({ "Polygon": idx+1, "Error": "Neapstrādājams objekts" });
           }
