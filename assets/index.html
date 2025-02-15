@@ -106,6 +106,8 @@
       max-height: 200px;
       overflow-y: auto;
       font-size: 0.9rem;
+      /* Paslēpts pēc noklusējuma */
+      display: none;
     }
     .polygon-number {
       background: rgba(255,255,255,0.8);
@@ -249,6 +251,7 @@
   </div>
 
   <div id="map"></div>
+  <!-- Debug logs – paslēpts pēc noklusējuma -->
   <div id="debug"><strong>Debug:</strong><br></div>
 
   <!-- Iekļaujam nepieciešamās bibliotēkas -->
@@ -788,10 +791,14 @@
     }
     
     document.getElementById("compute").addEventListener("click", function(){
+      // Parādām debug logu, kad sākas apstrāde
+      document.getElementById("debug").style.display = "block";
+      
       const file1 = document.getElementById("csv1").files[0];
       const file2 = document.getElementById("csv2").files[0];
       const fileGeo = document.getElementById("geojson").files[0];
       const outputDiv = document.getElementById("output");
+      // Nodzēšam iepriekšējo debug saturu
       document.getElementById("debug").innerHTML = "<strong>Debug:</strong><br>";
       if (!file1 || !file2 || !fileGeo) {
         outputDiv.innerHTML = "Lūdzu, atlasiet visus failus.";
