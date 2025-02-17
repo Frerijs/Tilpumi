@@ -230,7 +230,7 @@
     <label><strong>3. Kontūras (*.DXF vai *.GeoJSON):</strong>
       <input type="file" id="geojson" accept=".geojson,.json,.dxf">
     </label>
-    <label><strong>Ievadiet zīmes aiz komata (noklusējums 1):</strong>
+    <label><strong>Ievadiet zīmes aiz komata:</strong>
       <input type="number" id="decimalCount" value="1" min="0" style="width:60px;">
     </label>
     <div class="button-container">
@@ -604,13 +604,29 @@
     const map = L.map('map').setView([56.95, 24.1], 7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
 
+    /**
+     * ŠEIT GALVENĀ IZMAIŅA: Pareiza LKS-92 (EPSG:3059) proj4 definīcija
+     * 
+     * Oficiālā (pamata) definīcija:
+     * +proj=tmerc +lat_0=0 +lon_0=24 +k=0.9996 +x_0=500000 +y_0=-6000000 +ellps=GRS80 +units=m +no_defs
+     **/
     function reprojectGeoJSON(geojson) {
-      proj4.defs("EPSG:3059", "+proj=tmerc +lat_0=56.78 +lon_0=24.06 +k=0.9999 +x_0=500000 +y_0=500000 +ellps=GRS80 +units=m +no_defs");
-      const source = "EPSG:3059", dest = "EPSG:4326";
+      proj4.defs(
+        "EPSG:3059",
+        "+proj=tmerc +lat_0=0 +lon_0=24 +k=0.9996 +x_0=500000 +y_0=-6000000 +ellps=GRS80 +units=m +no_defs"
+      );
+      const source = "EPSG:3059";
+      const dest = "EPSG:4326";
+
       function reprojectCoords(coords) {
-        if (typeof coords[0] === 'number') return proj4(source, dest, coords);
-        else return coords.map(reprojectCoords);
+        // Ja coords ir [x, y], tad proj4 atgriež [lon, lat]
+        if (typeof coords[0] === 'number') {
+          return proj4(source, dest, coords);
+        } else {
+          return coords.map(reprojectCoords);
+        }
       }
+
       const newGeoJSON = JSON.parse(JSON.stringify(geojson));
       newGeoJSON.features.forEach(feature => {
         feature.geometry.coordinates = reprojectCoords(feature.geometry.coordinates);
@@ -626,7 +642,14 @@
           let sumX = 0, sumY = 0;
           coords.forEach(pt => { sumX += pt[0]; sumY += pt[1]; });
           const avgX = sumX / coords.length, avgY = sumY / coords.length;
-          const marker = L.marker([avgY, avgX], { icon: L.divIcon({ className: 'polygon-number', html: feature.properties.index, iconSize: [20,20] }), interactive: false });
+          const marker = L.marker([avgY, avgX], {
+            icon: L.divIcon({
+              className: 'polygon-number',
+              html: feature.properties.index,
+              iconSize: [20,20]
+            }),
+            interactive: false
+          });
           numberLayer.addLayer(marker);
         }
       });
@@ -663,6 +686,8 @@
       outputDiv.innerHTML = summaryHtml + tableHtml;
       document.getElementById("map").style.display = "block";
       map.invalidateSize();
+
+      // Uzbūvējam galarezultāta GeoJSON ar cut/fill/net atribūtiem
       const outputGeoJSON = { type: "FeatureCollection", features: [] };
       outputGeoJSON.crs = { type: "name", properties: { name: "EPSG:3059" } };
       geoData.features.forEach((feature, i) => {
@@ -679,6 +704,8 @@
         outputGeoJSON.features.push(newFeature);
       });
       resultGeoJSON = outputGeoJSON;
+
+      // Aktivizējam "Lejuplādēt GeoJSON" pogu
       const downloadGeojsonBtn = document.getElementById("downloadGeojson");
       downloadGeojsonBtn.style.display = "inline-block";
       downloadGeojsonBtn.onclick = function() {
@@ -686,9 +713,15 @@
         const blob = new Blob([geojsonStr], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url; a.download = "result.geojson";
-        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+        a.href = url;
+        a.download = "result.geojson";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
       };
+
+      // Aktivizējam "Lejuplādēt DXF" pogu
       const downloadDXFBtn = document.getElementById("downloadDXF");
       downloadDXFBtn.style.display = "inline-block";
       downloadDXFBtn.onclick = function() {
@@ -696,53 +729,87 @@
         const blob = new Blob([dxfStr], { type: "application/octet-stream" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url; a.download = "rezultati.dxf";
-        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+        a.href = url;
+        a.download = "rezultati.dxf";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
       };
+
+      // Attēlojam rezultātus kartē (reprojekcija uz EPSG:4326)
       const reprojectedGeoJSON = reprojectGeoJSON(outputGeoJSON);
       if (resultLayer) map.removeLayer(resultLayer);
       resultLayer = L.geoJSON(reprojectedGeoJSON, {
         style: feature => ({ color: 'red', weight: 2, fillOpacity: 0.3 }),
         onEachFeature: (feature, layer) => {
-          let tooltipContent = feature.properties.error ? "Neapstrādājams objekts" :
-            "Cut: " + feature.properties.cut.toFixed(decimals) + " m³<br>" +
-            "Fill: " + feature.properties.fill.toFixed(decimals) + " m³<br>" +
-            "Net: " + feature.properties.net.toFixed(decimals) + " m³";
+          let tooltipContent = feature.properties.error
+            ? "Neapstrādājams objekts"
+            : "Cut: " + feature.properties.cut.toFixed(decimals) + " m³<br>" +
+              "Fill: " + feature.properties.fill.toFixed(decimals) + " m³<br>" +
+              "Net: " + feature.properties.net.toFixed(decimals) + " m³";
           layer.bindTooltip(tooltipContent, { sticky: true });
         }
       }).addTo(map);
+
       polygonNumberLayer = addPolygonNumbers(reprojectedGeoJSON);
       polygonNumberLayer.addTo(map);
+
+      // Pārslēgšanās starp slāņiem
       if (layerControl) map.removeControl(layerControl);
-      layerControl = L.control.layers(null, {
-        "Rezultātu slānis": resultLayer,
-        "Virsma 1": tinLayer1,
-        "Virsma 2": tinLayer2,
-        "Numerācija": polygonNumberLayer,
-        "Ortofoto": ortoLayer
-      }, { collapsed: false }).addTo(map);
+      layerControl = L.control.layers(
+        null,
+        {
+          "Rezultātu slānis": resultLayer,
+          "Virsma 1": tinLayer1,
+          "Virsma 2": tinLayer2,
+          "Numerācija": polygonNumberLayer,
+          "Ortofoto": ortoLayer
+        },
+        { collapsed: false }
+      ).addTo(map);
+
       map.fitBounds(resultLayer.getBounds());
+
+      // Aktivizējam "Lejuplādēt Excel" pogu
       const downloadExcelBtn = document.getElementById("downloadExcel");
       downloadExcelBtn.style.display = "inline-block";
       downloadExcelBtn.onclick = function() {
         const excelData = [];
         results.forEach((res, idx) => {
           if (res) {
-            excelData.push({ "Polygon": idx+1, "Cut (m³)": res.cut.toFixed(decimals), "Fill (m³)": res.fill.toFixed(decimals), "Net (m³)": res.net.toFixed(decimals) });
+            excelData.push({
+              "Polygon": idx+1,
+              "Cut (m³)": res.cut.toFixed(decimals),
+              "Fill (m³)": res.fill.toFixed(decimals),
+              "Net (m³)": res.net.toFixed(decimals)
+            });
           } else {
-            excelData.push({ "Polygon": idx+1, "Error": "Neapstrādājams objekts" });
+            excelData.push({
+              "Polygon": idx+1,
+              "Error": "Neapstrādājams objekts"
+            });
           }
         });
         const worksheet = XLSX.utils.json_to_sheet(excelData);
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "Rezultāti");
         const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'binary' });
-        function s2ab(s) { const buf = new ArrayBuffer(s.length); const view = new Uint8Array(buf); for (let i = 0; i < s.length; i++) view[i] = s.charCodeAt(i) & 0xFF; return buf; }
+        function s2ab(s) {
+          const buf = new ArrayBuffer(s.length);
+          const view = new Uint8Array(buf);
+          for (let i = 0; i < s.length; i++) view[i] = s.charCodeAt(i) & 0xFF;
+          return buf;
+        }
         const blob = new Blob([s2ab(wbout)], { type: "application/octet-stream" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url; a.download = "rezultati.xlsx";
-        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+        a.href = url;
+        a.download = "rezultati.xlsx";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
       };
     }
     
@@ -754,6 +821,7 @@
       const numWorkers = Math.min(navigator.hardwareConcurrency || 4, totalTasks);
       logDebug("Izveidoju " + numWorkers + " workerus.");
       const workers = [];
+
       for (let i = 0; i < numWorkers; i++) {
         const worker = new Worker(workerBlobURL);
         worker.onmessage = function(e) {
@@ -778,15 +846,18 @@
               logDebug("Visi feature apstrādāti.");
               displayResults(resultsArray);
             }
-          } else if (msg.type === "error") {
-            logDebug("Worker error: " + msg.message);
           }
         };
         worker.onerror = function(e) { logDebug("Worker error: " + e.message); };
         workers.push(worker);
       }
+
       workers.forEach(worker => {
-        worker.postMessage({ type: "init", csvData1: csvData1, csvData2: csvData2 });
+        worker.postMessage({
+          type: "init",
+          csvData1: csvData1,
+          csvData2: csvData2
+        });
       });
     }
     
@@ -800,10 +871,12 @@
       const outputDiv = document.getElementById("output");
       // Nodzēšam iepriekšējo debug saturu
       document.getElementById("debug").innerHTML = "<strong>Debug:</strong><br>";
+
       if (!file1 || !file2 || !fileGeo) {
         outputDiv.innerHTML = "Lūdzu, atlasiet visus failus.";
         return;
       }
+
       let readCount = 0;
       function checkAllRead() {
         readCount++;
@@ -812,24 +885,44 @@
           globalDelaunay1_main = d3.Delaunay.from(csvData1, d => d.x, d => d.y);
           globalDelaunay2_main = d3.Delaunay.from(csvData2, d => d.x, d => d.y);
           logDebug("TIN virsmas izveidotas.");
+
+          // Parādam lejupielādes pogas TIN un LandXML
           document.getElementById("downloadTIN1").style.display = "inline-block";
           document.getElementById("downloadTIN2").style.display = "inline-block";
           document.getElementById("downloadLandXML1").style.display = "inline-block";
           document.getElementById("downloadLandXML2").style.display = "inline-block";
+
           const geojsonTIN1 = delaunayToGeoJSON(globalDelaunay1_main, csvData1);
           const geojsonTIN2 = delaunayToGeoJSON(globalDelaunay2_main, csvData2);
           const reprojectedTIN1 = reprojectGeoJSON(geojsonTIN1);
           const reprojectedTIN2 = reprojectGeoJSON(geojsonTIN2);
-          tinLayer1 = L.geoJSON(reprojectedTIN1, { style: { color: 'blue', weight: 1, opacity: 0.5 } });
-          tinLayer2 = L.geoJSON(reprojectedTIN2, { style: { color: 'green', weight: 1, opacity: 0.5 } });
+
+          tinLayer1 = L.geoJSON(reprojectedTIN1, {
+            style: { color: 'blue', weight: 1, opacity: 0.5 }
+          });
+          tinLayer2 = L.geoJSON(reprojectedTIN2, {
+            style: { color: 'green', weight: 1, opacity: 0.5 }
+          });
+
           logDebug("Sāku workeru apstrādi...");
           startWorkerPool();
         }
       }
+
       const reader1 = new FileReader();
-      reader1.onload = function(e) { csvData1 = parseCSV(e.target.result); logDebug("CSV 1 ielādēts (" + csvData1.length + " punktu)."); checkAllRead(); };
+      reader1.onload = function(e) {
+        csvData1 = parseCSV(e.target.result);
+        logDebug("CSV 1 ielādēts (" + csvData1.length + " punktu).");
+        checkAllRead();
+      };
+
       const reader2 = new FileReader();
-      reader2.onload = function(e) { csvData2 = parseCSV(e.target.result); logDebug("CSV 2 ielādēts (" + csvData2.length + " punktu)."); checkAllRead(); };
+      reader2.onload = function(e) {
+        csvData2 = parseCSV(e.target.result);
+        logDebug("CSV 2 ielādēts (" + csvData2.length + " punktu).");
+        checkAllRead();
+      };
+
       const readerGeo = new FileReader();
       readerGeo.onload = function(e) {
         const fileName = fileGeo.name.toLowerCase();
@@ -847,49 +940,78 @@
         }
         checkAllRead();
       };
+
       reader1.readAsText(file1);
       reader2.readAsText(file2);
       readerGeo.readAsText(fileGeo);
     });
 
     document.getElementById("downloadTIN1").addEventListener("click", function(){
-      if (!globalDelaunay1_main || !csvData1) { logDebug("CSV1 vai TIN 1 nav pieejams."); return; }
+      if (!globalDelaunay1_main || !csvData1) {
+        logDebug("CSV1 vai TIN 1 nav pieejams.");
+        return;
+      }
       const geojsonTIN1 = delaunayToGeoJSON(globalDelaunay1_main, csvData1);
       const blob = new Blob([JSON.stringify(geojsonTIN1, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = "Virsma1_GeoJSON.geojson";
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+      a.href = url;
+      a.download = "Virsma1_GeoJSON.geojson";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     });
 
     document.getElementById("downloadTIN2").addEventListener("click", function(){
-      if (!globalDelaunay2_main || !csvData2) { logDebug("CSV2 vai TIN 2 nav pieejams."); return; }
+      if (!globalDelaunay2_main || !csvData2) {
+        logDebug("CSV2 vai TIN 2 nav pieejams.");
+        return;
+      }
       const geojsonTIN2 = delaunayToGeoJSON(globalDelaunay2_main, csvData2);
       const blob = new Blob([JSON.stringify(geojsonTIN2, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = "Virsma2_GeoJSON.geojson";
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+      a.href = url;
+      a.download = "Virsma2_GeoJSON.geojson";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     });
 
     document.getElementById("downloadLandXML1").addEventListener("click", function(){
-      if (!globalDelaunay1_main || !csvData1) { logDebug("CSV1 vai TIN 1 nav pieejams."); return; }
+      if (!globalDelaunay1_main || !csvData1) {
+        logDebug("CSV1 vai TIN 1 nav pieejams.");
+        return;
+      }
       const landxmlStr = delaunayToLandXML(globalDelaunay1_main, csvData1, "Virsma 1");
       const blob = new Blob([landxmlStr], { type: "application/xml" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = "Virsma1_LandXML.xml";
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+      a.href = url;
+      a.download = "Virsma1_LandXML.xml";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     });
 
     document.getElementById("downloadLandXML2").addEventListener("click", function(){
-      if (!globalDelaunay2_main || !csvData2) { logDebug("CSV2 vai TIN 2 nav pieejams."); return; }
+      if (!globalDelaunay2_main || !csvData2) {
+        logDebug("CSV2 vai TIN 2 nav pieejams.");
+        return;
+      }
       const landxmlStr = delaunayToLandXML(globalDelaunay2_main, csvData2, "Virsma 2");
       const blob = new Blob([landxmlStr], { type: "application/xml" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = "Virsma2_LandXML.xml";
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+      a.href = url;
+      a.download = "Virsma2_LandXML.xml";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     });
   </script>
 
